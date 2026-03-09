@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CookieFlix - Cloud Vault</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Firebase SDK (Versi Kompatibilitas) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #141414; color: white; margin: 0; overflow-x: hidden; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #181818; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #444; }
+        #root { min-height: 100vh; }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .poster-gradient { background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.1) 100%); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // --- KONFIGURASI FIREBASE ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBkDlN7fBkBqia2Lf_tSj0sNLTZILQ90Aw",
+            authDomain: "cookieflix-6aa9e.firebaseapp.com",
+            projectId: "cookieflix-6aa9e",
+            storageBucket: "cookieflix-6aa9e.firebasestorage.app",
+            messagingSenderId: "365795289192",
+            appId: "1:365795289192:web:837653f622d8ef7c0673dd",
+            measurementId: "G-99FZBGDL7T"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const appId = "cookieflix-prod-v1";
+
+        // Komponen Logo dengan Fallback Otomatis
+        const ServiceLogo = ({ domain, name, className = "" }) => {
+            const [imgSrc, setImgSrc] = useState(`https://logo.clearbit.com/${domain}`);
+            const [status, setStatus] = useState('clearbit');
+
+            const handleError = () => {
+                if (status === 'clearbit') {
+                    setImgSrc(`https://www.google.com/s2/favicons?domain=${domain}&sz=128`);
+                    setStatus('google');
+                } else if (status === 'google') {
+                    setImgSrc(`https://icons.duckduckgo.com/ip3/${domain}.ico`);
+                    setStatus('duckduckgo');
+                } else {
+                    setImgSrc(`https://ui-avatars.com/api/?name=${name}&background=random&color=fff&bold=true`);
+                    setStatus('initial');
+                }
+            };
+
+            useEffect(() => {
+                setImgSrc(`https://logo.clearbit.com/${domain}`);
+                setStatus('clearbit');
+            }, [domain]);
+
+            return (
+                <img 
+                    src={imgSrc} 
+                    alt={name} 
+                    className={`object-contain transition-all duration-300 ${className}`}
+                    onError={handleError}
+                />
+            );
+        };
+
+        const App = () => {
+            const [searchTerm, setSearchTerm] = useState('');
+            const [selectedService, setSelectedService] = useState(null);
+            const [copiedId, setCopiedId] = useState(null);
+            const [activeCategory, setActiveCategory] = useState('Semua');
+            const [isDragging, setIsDragging] = useState(false);
+            const [accounts, setAccounts] = useState([]);
+            const [isSyncing, setIsSyncing] = useState(true);
+            const [user, setUser] = useState(null);
+            const [authError, setAuthError] = useState(null);
+
+            // Hook Autentikasi
+            useEffect(() => {
+                const unsubscribe = auth.onAuthStateChanged((u) => {
+                    if (!u) {
+                        auth.signInAnonymously().catch(err => {
+                            if (err.code === 'auth/configuration-not-found') setAuthError("Fitur Anonymous Auth belum aktif di Firebase.");
+                        });
+                    }
+                    setUser(u);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // Hook Sinkronisasi Real-time
+            useEffect(() => {
+                if (!user) return; 
+                const accountsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('accounts');
+                const unsubscribe = accountsRef.onSnapshot((snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setAccounts(data);
+                    setIsSyncing(false);
+                }, () => setIsSyncing(false));
+                return () => unsubscribe();
+            }, [user]);
+
+            const domainMap = { 
+                'netflix': 'netflix.com', 'chatgpt': 'openai.com', 'openai': 'openai.com',
+                'prime': 'primevideo.com', 'apple': 'apple.com', 'disney': 'disneyplus.com', 
+                'symbolab': 'symbolab.com', 'quizlet': 'quizlet.com', 'busuu': 'busuu.com',
+                'studocu': 'studocu.com', 'datacamp': 'datacamp.com', 'codeacademy': 'codecademy.com',
+                'udemy': 'udemy.com', 'semrush': 'semrush.com', 'tradingview': 'tradingview.com', 
+                'crunchyroll': 'crunchyroll.com', 'bstation': 'bilibili.tv', 'youku': 'youku.com'
+            };
+
+            const servicePosterMap = {
+                'netflix': 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=800&q=80',
+                'prime': 'https://images.unsplash.com/photo-1585647347483-22b66260dfff?auto=format&fit=crop&w=800&q=80',
+                'chatgpt': 'https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&w=800&q=80',
+                'tradingview': 'https://images.unsplash.com/photo-1611974714652-960201dfce2f?auto=format&fit=crop&w=800&q=80',
+                'edu': 'https://images.unsplash.com/photo-1524995997946-a1c2e315a42f?auto=format&fit=crop&w=800&q=80'
+            };
+
+            const processFiles = (files) => {
+                if (!user) return;
+                Array.from(files).forEach(file => {
+                    if (file.name.endsWith('.txt')) {
+                        const reader = new FileReader();
+                        reader.onload = async (e) => {
+                            const content = e.target.result;
+                            const fileName = file.name.replace('.txt', '');
+                            const lowerName = fileName.toLowerCase();
+
+                            // Mendapatkan tanggal hari ini dalam format Indonesia
+                            const today = new Date().toLocaleDateString('id-ID', {
+                                day: 'numeric',
+                                month: 'long',
+                                year: 'numeric'
+                            });
+
+                            let category = 'Lainnya';
+                            if (['netflix', 'prime', 'apple', 'disney', 'crunchyroll', 'bstation'].some(k => lowerName.includes(k))) category = 'Streaming';
+                            else if (['chatgpt', 'openai', 'ai'].some(k => lowerName.includes(k))) category = 'AI';
+                            else if (['symbolab', 'udemy', 'quizlet', 'busuu', 'studocu', 'datacamp', 'codeacademy'].some(k => lowerName.includes(k))) category = 'Edukasi';
+
+                            let domain = 'google.com';
+                            for (const [key, dom] of Object.entries(domainMap)) {
+                                if (lowerName.includes(key)) { domain = dom; break; }
+                            }
+
+                            await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('accounts').add({
+                                name: fileName, 
+                                category, 
+                                content, 
+                                domain, 
+                                status: 'online', 
+                                lastVerified: new Date().toISOString(),
+                                uploadDate: today // Menyimpan tanggal upload
+                            });
+                        };
+                        reader.readAsText(file);
+                    }
+                });
+            };
+
+            const deleteSingleAccount = async (id, accountName) => {
+                if (window.confirm(`Apakah Anda yakin ingin menghapus akun "${accountName}"?`)) {
+                    try {
+                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('accounts').doc(id).delete();
+                        const remaining = accounts.filter(a => a.id !== id);
+                        const baseName = accountName.split(/[ \d\_\-]/)[0];
+                        const groupRemaining = remaining.find(a => a.name.startsWith(baseName));
+                        if (!groupRemaining) setSelectedService(null);
+                    } catch (err) {
+                        console.error("Gagal menghapus akun:", err);
+                    }
+                }
+            };
+
+            const groupedServices = useMemo(() => {
+                const groups = {};
+                accounts.forEach(item => {
+                    const baseName = item.name.split(/[ \d\_\-]/)[0];
+                    if (!groups[baseName]) groups[baseName] = { name: baseName, category: item.category, domain: item.domain, accounts: [] };
+                    groups[baseName].accounts.push(item);
+                });
+                return Object.values(groups);
+            }, [accounts]);
+
+            const filteredServices = groupedServices.filter(s => 
+                s.name.toLowerCase().includes(searchTerm.toLowerCase()) && (activeCategory === 'Semua' || s.category === activeCategory)
+            );
+
+            const copyToClipboard = (text, id) => {
+                const textArea = document.body.appendChild(document.createElement("textarea"));
+                textArea.value = text;
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    setCopiedId(id);
+                    setTimeout(() => setCopiedId(null), 2000);
+                } catch (err) {}
+                document.body.removeChild(textArea);
+            };
+
+            if (authError) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-6 text-center">
+                        <div className="max-w-md w-full bg-red-900/10 border border-red-600/30 p-10 rounded-[3rem] shadow-2xl">
+                            <h1 className="text-2xl font-black text-red-500 mb-4 tracking-tighter uppercase leading-none">Login Gagal</h1>
+                            <p className="text-zinc-400 text-sm mb-8 italic">"{authError}"</p>
+                            <button onClick={() => window.location.reload()} className="w-full bg-white text-black py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-zinc-200 transition-all">Refresh Halaman</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen animate-fade-in" onDragOver={e => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={e => { e.preventDefault(); setIsDragging(false); processFiles(e.dataTransfer.files); }}>
+                    {/* Navbar */}
+                    <nav className="fixed top-0 w-full z-50 bg-black/90 p-4 md:px-12 flex items-center justify-between backdrop-blur-md border-b border-white/5">
+                        <h1 className="text-red-600 text-3xl font-black tracking-tighter uppercase">COOKIEFLIX</h1>
+                        <div className="flex items-center gap-4">
+                            <div className="relative group">
+                                <i data-lucide="search" className="absolute left-3 top-2.5 w-4 h-4 text-gray-500 group-focus-within:text-white transition-colors"></i>
+                                <input type="text" placeholder="Cari akun..." className="bg-zinc-900 border border-zinc-700 pl-10 pr-4 py-1.5 rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-red-600 w-40 md:w-64 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                            </div>
+                            <button onClick={() => { if(window.confirm("Hapus seluruh database Cloud?")) accounts.forEach(a => db.collection('artifacts').doc(appId).collection('public').doc('data').collection('accounts').doc(a.id).delete()) }} className="p-2 text-zinc-500 hover:text-red-500 transition-colors" title="Hapus Semua Database"><i data-lucide="trash-2" className="w-5 h-5"></i></button>
+                        </div>
+                    </nav>
+
+                    {/* Banner Hero */}
+                    <header className="relative h-[65vh] flex items-center px-4 md:px-12 pt-20 overflow-hidden">
+                        <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent z-10"></div>
+                        <img src="https://raw.githubusercontent.com/akbarromadon34-beep/renzgame/refs/heads/main/nettr.jpg" className="absolute inset-0 w-full h-full object-cover opacity-60" alt="Banner Hero" />
+                        <div className="relative z-20 max-w-2xl text-left">
+                            <div className="flex items-center gap-3 mb-6 bg-black/60 w-fit px-4 py-2 rounded-xl border border-white/10">
+                                <div className="flex -space-x-3">
+                                    <ServiceLogo domain="netflix.com" name="N" className="w-8 h-8 rounded-full border-2 border-black bg-white" />
+                                    <ServiceLogo domain="primevideo.com" name="P" className="w-8 h-8 rounded-full border-2 border-zinc-900 bg-white" />
+                                    <ServiceLogo domain="openai.com" name="O" className="w-8 h-8 rounded-full border-2 border-zinc-900 bg-white" />
+                                </div>
+                                <span className="text-[10px] font-bold tracking-[0.3em] uppercase ml-4">The Ultimate Cloud Hub</span>
+                            </div>
+                            <h2 className="text-7xl font-black mb-4 tracking-tighter leading-tight drop-shadow-2xl text-white">Simpan & <br/> Sinkron.</h2>
+                            <p className="text-gray-200 mb-8 max-w-lg text-lg leading-relaxed font-medium italic opacity-80">"Database premium favorit Anda, kini selalu dalam genggaman dengan tanggal upload otomatis."</p>
+                            <label className="cursor-pointer bg-red-600 px-10 py-4 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-red-700 transition-all shadow-2xl inline-flex items-center gap-3 active:scale-95 shadow-[0_0_20px_rgba(220,38,38,0.4)]">
+                                <i data-lucide="upload" className="w-5 h-5"></i> Sinkron Database Baru
+                                <input type="file" multiple accept=".txt" className="hidden" onChange={e => processFiles(e.target.files)} />
+                            </label>
+                        </div>
+                    </header>
+
+                    {/* Main Grid */}
+                    <main className="px-4 md:px-12 py-12">
+                        <div className="flex items-center gap-4 mb-10 overflow-x-auto pb-4 scrollbar-hide">
+                            {['Semua', 'Streaming', 'AI', 'Edukasi', 'Lainnya'].map(cat => (
+                                <button key={cat} onClick={() => setActiveCategory(cat)} className={`whitespace-nowrap px-8 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${activeCategory === cat ? 'bg-red-600 text-white shadow-lg' : 'bg-zinc-900 text-zinc-500 hover:text-white'}`}>
+                                    {cat}
+                                </button>
+                            ))}
+                        </div>
+
+                        {isSyncing ? (
+                            <div className="text-center py-24 text-gray-500 uppercase tracking-widest text-sm flex flex-col items-center gap-4">
+                                <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+                                Memuat Database...
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6 md:gap-8">
+                                {filteredServices.map(service => {
+                                    const lowerName = service.name.toLowerCase();
+                                    let posterUrl = service.category === 'Edukasi' ? servicePosterMap.edu : 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80';
+                                    for (const [key, url] of Object.entries(servicePosterMap)) {
+                                        if (lowerName.includes(key)) { posterUrl = url; break; }
+                                    }
+
+                                    return (
+                                        <div key={service.name} onClick={() => setSelectedService(service)} className="group relative aspect-[2/3] rounded-[2.5rem] overflow-hidden cursor-pointer bg-zinc-900 border border-zinc-800 transition-all hover:scale-105 shadow-2xl active:scale-95">
+                                            <img src={posterUrl} className="absolute inset-0 w-full h-full object-cover opacity-40 group-hover:opacity-60 transition-opacity" />
+                                            <div className="absolute inset-0 poster-gradient opacity-90"></div>
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+                                                <div className="w-20 h-20 bg-white rounded-3xl p-3 mb-4 shadow-xl border-4 border-zinc-800 transform group-hover:rotate-6 transition-transform">
+                                                    <ServiceLogo domain={service.domain} name={service.name} className="w-full h-full" />
+                                                </div>
+                                                <h4 className="text-xl font-black uppercase tracking-tighter leading-tight drop-shadow-md text-white">{service.name}</h4>
+                                                <span className="text-[10px] bg-red-600 px-3 py-1 rounded-full mt-3 font-black uppercase tracking-widest shadow-lg">{service.accounts.length} Akun</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Modal Detail */}
+                    {selectedService && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                            <div className="absolute inset-0 bg-black/95 backdrop-blur-2xl" onClick={() => setSelectedService(null)}></div>
+                            <div className="relative bg-[#121212] w-full max-w-xl rounded-[3.5rem] overflow-hidden border border-zinc-800 shadow-[0_0_80px_rgba(220,38,38,0.2)] animate-in fade-in zoom-in duration-300">
+                                <div className="h-56 relative flex items-center justify-center">
+                                    <button onClick={() => setSelectedService(null)} className="absolute top-8 right-8 p-3 bg-black/50 rounded-full hover:bg-red-600 z-20 text-white transition-all shadow-xl"><i data-lucide="x" className="w-6 h-6"></i></button>
+                                    <div className="relative z-10 flex flex-col items-center text-center px-4">
+                                        <div className="w-24 h-24 bg-white rounded-[2rem] p-4 mb-3 shadow-xl border-4 border-zinc-900 transform -rotate-2">
+                                            <ServiceLogo domain={selectedService.domain} name={selectedService.name} className="w-full h-full" />
+                                        </div>
+                                        <h2 className="text-4xl font-black uppercase tracking-tighter drop-shadow-2xl text-white">{selectedService.name}</h2>
+                                    </div>
+                                </div>
+                                <div className="p-10 space-y-4 max-h-[450px] overflow-y-auto custom-scrollbar">
+                                    {selectedService.accounts.map(acc => (
+                                        <div key={acc.id} className="bg-zinc-900/60 border border-zinc-800/50 p-6 rounded-[2.5rem] flex items-center justify-between hover:border-red-600/30 transition-all backdrop-blur-xl group shadow-lg">
+                                            <div className="text-left flex-1 pr-4">
+                                                <p className="font-black text-lg tracking-tight text-white line-clamp-1">{acc.name}</p>
+                                                <div className="flex flex-col gap-1 mt-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                                                        <span className="text-[10px] text-zinc-500 uppercase font-black tracking-widest">Active in Cloud</span>
+                                                    </div>
+                                                    {/* Menampilkan Tanggal Upload */}
+                                                    <div className="flex items-center gap-1.5 text-zinc-600">
+                                                        <i data-lucide="calendar" className="w-3 h-3"></i>
+                                                        <span className="text-[9px] font-bold uppercase tracking-wider">Diunggah: {acc.uploadDate || 'Lama'}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => copyToClipboard(acc.content, acc.id)} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl active:scale-95 ${copiedId === acc.id ? 'bg-emerald-600 text-white' : 'bg-white text-black hover:bg-zinc-200'}`}>
+                                                    {copiedId === acc.id ? 'Tersalin' : 'Copy'}
+                                                </button>
+                                                <button 
+                                                    onClick={() => deleteSingleAccount(acc.id, acc.name)}
+                                                    className="p-3 rounded-2xl bg-zinc-800 text-zinc-500 hover:bg-red-600 hover:text-white transition-all active:scale-90"
+                                                    title="Hapus Akun Ini"
+                                                >
+                                                    <i data-lucide="trash-2" className="w-4 h-4"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Drag & Drop Overlay */}
+                    {isDragging && (
+                        <div className="fixed inset-0 z-[200] bg-red-600/30 backdrop-blur-3xl flex flex-col items-center justify-center pointer-events-none animate-in fade-in duration-200">
+                            <div className="bg-white text-red-600 p-16 rounded-full mb-8 animate-bounce shadow-2xl"><i data-lucide="upload" className="w-20 h-20"></i></div>
+                            <h2 className="text-7xl font-black uppercase tracking-tighter drop-shadow-2xl">LEPASKAN SEKARANG</h2>
+                            <p className="text-xl font-bold opacity-90 mt-4 tracking-widest uppercase text-white italic">"Merapikan & Menyinkronkan..."</p>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+        
+        const refreshIcons = () => { if (window.lucide) { window.lucide.createIcons(); } };
+        setTimeout(refreshIcons, 500);
+        setInterval(refreshIcons, 2000); 
+    </script>
+</body>
+</html>
