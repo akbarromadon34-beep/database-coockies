@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cookie Vault</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <h1>Cookie Vault</h1>
+    <p>Save, manage, and organize your data like Netflix library</p>
+
+    <input id="searchInput" type="text" placeholder="Search cookies, Netflix, YouTube..." oninput="liveSearch()">
+  </div>
+</div>
+
+<div class="container">
+  <input type="file" multiple onchange="handleUpload(event)" />
+  <div id="grid" class="grid"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
